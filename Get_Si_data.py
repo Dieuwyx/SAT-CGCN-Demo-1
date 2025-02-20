@@ -32,6 +32,3 @@ with open('Si_data/id_prop.csv', 'w', newline='') as csvfile:
     for idoc in tqdm(docs[:5000]):  # 保存前5000个结构到cif文件
         # 写入ID和band_gap数据方便后续训练
         writer.writerow([idoc.material_id, idoc.formation_energy_per_atom])
-
-
-# 这是一个修改测试
