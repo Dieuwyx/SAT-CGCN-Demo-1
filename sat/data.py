@@ -7,7 +7,6 @@ from torch_geometric.data import Data
 import numpy as np
 import os
 
-from  cgcn_data import CIFData, collate_pool
 
 def my_inc(self, key, value, *args, **kwargs):
     if key == 'subgraph_edge_index':

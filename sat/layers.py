@@ -28,13 +28,9 @@ class Attention(gnn.MessagePassing):
     """
 
     def __init__(self, embed_dim, num_heads=8, dropout=0., bias=False,
-                 batch_first=False,
         symmetric=False, gnn_type="gcn", se="gnn", k_hop=2, **kwargs):
 
         super().__init__(node_dim=0, aggr='add')
-        #
-        self.batch_first = batch_first
-        #
         self.embed_dim = embed_dim
         self.bias = bias
         head_dim = embed_dim // num_heads
