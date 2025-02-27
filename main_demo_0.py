@@ -1,3 +1,26 @@
+
+'''
+Descripttion: 这是一个测试的main文件，所有参数默认如下：
+    --batch-size 128 
+    --epochs 100 
+    --lr 0.001 
+    --optim Adam 
+    --n-conv 4 
+    --atom-fea-len 64 
+    --h-fea-len 256 
+    --n-h 2 
+    --lr-milestones 50 80 
+    --val-ratio 0.15 
+    --test-ratio 0.15 
+    --weight-decay 1e-5 
+    --print-freq 20
+version: 0.0
+Author: 王逸轩
+Date: 2025-03-05 11:47:51
+LastEditors: 王逸轩
+LastEditTime: 2025-03-05 12:05:13
+'''
+
 import argparse
 import os
 import shutil
@@ -14,86 +37,127 @@ from sklearn import metrics
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
-from sat.data import CIFData
-from cgcnn.data import collate_pool, get_train_val_test_loader
-from cgcnn.model import CrystalGraphConvNet
+# 导入读取数据集、数据加载器、模型
+from CSAT.data import CIFData
+from CSAT.data import collate_pool, get_train_val_test_loader
+from CSAT.model import CrystalGraphConvNet
 
+warnings.filterwarnings("ignore")
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+# python main_demo_0.py ./dataset
+
+# 参数解析
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
+
+# 数据集路径
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
                     help='dataset options, started with the path to root dir, '
                          'then other options')
-parser.add_argument('--task', choices=['regression', 'classification'],
-                    default='regression', help='complete a regression or '
-                                                   'classification task (default: regression)')
+# 是否禁用CUDA
 parser.add_argument('--disable-cuda', action='store_true',
                     help='Disable CUDA')
+# 数据加载器工作线程数
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
                     help='number of data loading workers (default: 0)')
-parser.add_argument('--epochs', default=30, type=int, metavar='N',
+# 训练轮数
+parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run (default: 30)')
+# 起始轮数
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+# 批次大小
+parser.add_argument('-b', '--batch-size', default=128, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+# 学习率 0.01
+parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
                     metavar='LR', help='initial learning rate (default: '
                                        '0.01)')
+# 学习率衰减点
 parser.add_argument('--lr-milestones', default=[100], nargs='+', type=int,
                     metavar='N', help='milestones for scheduler (default: '
                                       '[100])')
+# 动量
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=0, type=float,
+# 权重衰减
+parser.add_argument('--weight-decay', '--wd', default=1e-5, type=float,
                     metavar='W', help='weight decay (default: 0)')
-parser.add_argument('--print-freq', '-p', default=10, type=int,
+# 打印频率
+parser.add_argument('--print-freq', '-p', default=1, type=int,
                     metavar='N', help='print frequency (default: 10)')
+# 恢复训练
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
+
+######################################################################################
 train_group = parser.add_mutually_exclusive_group()
+# 训练数据比例
 train_group.add_argument('--train-ratio', default=None, type=float, metavar='N',
                     help='number of training data to be loaded (default none)')
+# 训练数据大小
 train_group.add_argument('--train-size', default=None, type=int, metavar='N',
                          help='number of training data to be loaded (default none)')
+
+########################################################################################
+# 验证数据比例
 valid_group = parser.add_mutually_exclusive_group()
-valid_group.add_argument('--val-ratio', default=0.1, type=float, metavar='N',
+valid_group.add_argument('--val-ratio', default=0.15, type=float, metavar='N',
                     help='percentage of validation data to be loaded (default '
-                         '0.1)')
+                         '0.15)')
+# 验证数据大小
 valid_group.add_argument('--val-size', default=None, type=int, metavar='N',
                          help='number of validation data to be loaded (default '
                               '1000)')
+
+########################################################################################
+# 测试数据比例
 test_group = parser.add_mutually_exclusive_group()
-test_group.add_argument('--test-ratio', default=0.1, type=float, metavar='N',
-                    help='percentage of test data to be loaded (default 0.1)')
+# 测试数据大小
+test_group.add_argument('--test-ratio', default=0.15, type=float, metavar='N',
+                    help='percentage of test data to be loaded (default 0.15)')
 test_group.add_argument('--test-size', default=None, type=int, metavar='N',
                         help='number of test data to be loaded (default 1000)')
-
+########################################################################################
+# 优化器
 parser.add_argument('--optim', default='SGD', type=str, metavar='SGD',
                     help='choose an optimizer, SGD or Adam, (default: SGD)')
+# 原子特征长度
 parser.add_argument('--atom-fea-len', default=64, type=int, metavar='N',
                     help='number of hidden atom features in conv layers')
-parser.add_argument('--h-fea-len', default=128, type=int, metavar='N',
+# 隐藏特征长度
+parser.add_argument('--h-fea-len', default=256, type=int, metavar='N',
                     help='number of hidden features after pooling')
-parser.add_argument('--n-conv', default=3, type=int, metavar='N',
+# 卷积层数
+parser.add_argument('--n-conv', default=4, type=int, metavar='N',
                     help='number of conv layers')
-parser.add_argument('--n-h', default=1, type=int, metavar='N',
+# 隐藏层数
+parser.add_argument('--n-h', default=2, type=int, metavar='N',
                     help='number of hidden layers after pooling')
 
 args = parser.parse_args(sys.argv[1:])
 
+# 是否启用CUDA
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
+device = torch.device("cuda" if args.cuda else "cpu")
+print("CUDA", torch.cuda.is_available())
 
-if args.task == 'regression':
-    best_mae_error = 1e10
-else:
-    best_mae_error = 0.
+# 最佳MAE误差
+best_mae_error = 1e10
 
 
+# 主函数
 def main():
+    # 超参数、最有MAE误差初始化
     global args, best_mae_error
 
-    # load data
-    dataset = CIFData(*args.data_options)
+    # 加载数据集，输出：元组 ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
+    dataset = CIFData(*args.data_options, k_hop=3)
+    # 将数据列表整理成用于预测晶体的批处理性能，打包(atom_fea, nbr_fea, nbr_fea_idx, target)
     collate_fn = collate_pool
+    # 数据集划分函数 
+    # 输入完整数据集 + 划分参数 
+    # 输出：返回 train_loader, val_loader, test_loader
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         collate_fn=collate_fn,
@@ -109,39 +173,43 @@ def main():
         return_test=True)
 
     # obtain target value normalizer
-    if args.task == 'classification':
-        normalizer = Normalizer(torch.zeros(2))
-        normalizer.load_state_dict({'mean': 0., 'std': 1.})
+    # 任务类型为回归
+    if len(dataset) < 500:
+        warnings.warn('数据集较小，预期较低的准确性。 ')
+        # 从数据集中随机选择500个样本
+        sample_data_list = [dataset[i] for i in range(len(dataset))]
     else:
-        if len(dataset) < 500:
-            warnings.warn('Dataset has less than 500 data points. '
-                          'Lower accuracy is expected. ')
-            sample_data_list = [dataset[i] for i in range(len(dataset))]
-        else:
-            sample_data_list = [dataset[i] for i in
-                                sample(range(len(dataset)), 500)]
+        # 从数据集中随机选择500个样本
+        sample_data_list = [dataset[i] for i in sample(range(len(dataset)), 500)]
+        # 从随机取样的500样本数据列表中提取数据、目标、晶体ID
         _, sample_target, _ = collate_pool(sample_data_list)
+        # 用于目标值的正则化
         normalizer = Normalizer(sample_target)
 
-    # build model
-    structures, _, _ = dataset[0]
+    # 构建模型
+    # 获取第一个样本的全部特征
+    full_sample = dataset[0]
+    structures = (full_sample[0][0], full_sample[0][1], full_sample[0][2])  # atom_fea, nbr_fea, nbr_fea_idx
+    # 原始atom_fea
     orig_atom_fea_len = structures[0].shape[-1]
+    # 邻居特征长度nbr_fea
     nbr_fea_len = structures[1].shape[-1]
-    model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                atom_fea_len=args.atom_fea_len,
-                                n_conv=args.n_conv,
-                                h_fea_len=args.h_fea_len,
-                                n_h=args.n_h,
-                                classification=True if args.task ==
-                                                       'classification' else False)
+    
+    # 
+    model = CrystalGraphConvNet(
+        orig_atom_fea_len=orig_atom_fea_len,
+        nbr_fea_len=nbr_fea_len,
+        atom_fea_len=128,  # 增大特征维度
+        n_conv=4,          # 增加层数
+        h_fea_len=256,
+        n_h=2,
+        classification=False
+    )
     if args.cuda:
         model.cuda()
 
     # define loss func and optimizer
-    if args.task == 'classification':
-        criterion = nn.NLLLoss()
-    else:
-        criterion = nn.MSELoss()
+    criterion = nn.MSELoss()
     if args.optim == 'SGD':
         optimizer = optim.SGD(model.parameters(), args.lr,
                               momentum=args.momentum,
@@ -184,12 +252,9 @@ def main():
         scheduler.step()
 
         # remember the best mae_eror and save checkpoint
-        if args.task == 'regression':
-            is_best = mae_error < best_mae_error
-            best_mae_error = min(mae_error, best_mae_error)
-        else:
-            is_best = mae_error > best_mae_error
-            best_mae_error = max(mae_error, best_mae_error)
+        is_best = mae_error < best_mae_error
+        best_mae_error = min(mae_error, best_mae_error)
+        
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -210,61 +275,48 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    if args.task == 'regression':
-        mae_errors = AverageMeter()
-    else:
-        accuracies = AverageMeter()
-        precisions = AverageMeter()
-        recalls = AverageMeter()
-        fscores = AverageMeter()
-        auc_scores = AverageMeter()
+    mae_errors = AverageMeter()
 
     # switch to train mode
     model.train()
 
     end = time.time()
-    for i, (input, target, _) in enumerate(train_loader):
+    
+    for i, (input_batch, target, _) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
+        
+        # 正确解包输入元组
+        (atom_fea, nbr_fea, nbr_fea_idx, 
+         sub_nodes, sub_edges, sub_indicator) = input_batch
+        
+        batch_data = (
+            atom_fea.to(device),
+            nbr_fea.to(device),
+            nbr_fea_idx.to(device),
+            sub_nodes.to(device),
+            sub_edges.to(device),
+            sub_indicator.to(device)
+        )
 
-        if args.cuda:
-            input_var = (Variable(input[0].cuda(non_blocking=True)),
-                         Variable(input[1].cuda(non_blocking=True)),
-                         input[2].cuda(non_blocking=True),
-                         [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            input_var = (Variable(input[0]),
-                         Variable(input[1]),
-                         input[2],
-                         input[3])
         # normalize target
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
+        target_normed = normalizer.norm(target)
+
         if args.cuda:
             target_var = Variable(target_normed.cuda(non_blocking=True))
         else:
             target_var = Variable(target_normed)
 
         # compute output
-        output = model(*input_var)
+        output = model(batch_data)
+
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        if args.task == 'regression':
-            mae_error = mae(normalizer.denorm(output.data.cpu()), target)
-            losses.update(loss.data.cpu(), target.size(0))
-            mae_errors.update(mae_error, target.size(0))
-        else:
-            accuracy, precision, recall, fscore, auc_score = \
-                class_eval(output.data.cpu(), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            accuracies.update(accuracy, target.size(0))
-            precisions.update(precision, target.size(0))
-            recalls.update(recall, target.size(0))
-            fscores.update(fscore, target.size(0))
-            auc_scores.update(auc_score, target.size(0))
+        mae_error = mae(normalizer.denorm(output.data.cpu()), target)
+        losses.update(loss.data.cpu(), target.size(0))
+        mae_errors.update(mae_error, target.size(0))
+        
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -276,43 +328,20 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         end = time.time()
 
         if i % args.print_freq == 0:
-            if args.task == 'regression':
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
+            print('Epoch: [{0}][{1}/{2}]\t'
+                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
                     epoch, i, len(train_loader), batch_time=batch_time,
                     data_time=data_time, loss=losses, mae_errors=mae_errors)
-                )
-            else:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                      'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-                      'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                      'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                      'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, accu=accuracies,
-                    prec=precisions, recall=recalls, f1=fscores,
-                    auc=auc_scores)
                 )
 
 
 def validate(val_loader, model, criterion, normalizer, test=False):
     batch_time = AverageMeter()
     losses = AverageMeter()
-    if args.task == 'regression':
-        mae_errors = AverageMeter()
-    else:
-        accuracies = AverageMeter()
-        precisions = AverageMeter()
-        recalls = AverageMeter()
-        fscores = AverageMeter()
-        auc_scores = AverageMeter()
+    mae_errors = AverageMeter()
     if test:
         test_targets = []
         test_preds = []
@@ -323,85 +352,60 @@ def validate(val_loader, model, criterion, normalizer, test=False):
 
     end = time.time()
     for i, (input, target, batch_cif_ids) in enumerate(val_loader):
+        # === 修正输入解包方式 ===
+        (atom_fea, nbr_fea, nbr_fea_idx, 
+         sub_nodes, sub_edges, sub_indicator) = input
+        
+        atom_fea = atom_fea.to(device)
+        nbr_fea = nbr_fea.to(device)
+        nbr_fea_idx = nbr_fea_idx.to(device)
+        sub_nodes = sub_nodes.to(device)
+        sub_edges = sub_edges.to(device)
+        sub_indicator = sub_indicator.to(device)
+        
+         # 组合输入元组
+        model_input = (
+            atom_fea,
+            nbr_fea,
+            nbr_fea_idx,
+            sub_nodes,
+            sub_edges,
+            sub_indicator
+        )
+       
         if args.cuda:
-            with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
-        else:
-            with torch.no_grad():
-                input_var = (Variable(input[0]),
-                             Variable(input[1]),
-                             input[2],
-                             input[3])
-        if args.task == 'regression':
-            target_normed = normalizer.norm(target)
-        else:
-            target_normed = target.view(-1).long()
-        if args.cuda:
-            with torch.no_grad():
-                target_var = Variable(target_normed.cuda(non_blocking=True))
-        else:
-            with torch.no_grad():
-                target_var = Variable(target_normed)
-
+            target = target.cuda()
+        target_normed = normalizer.norm(target)  # 确保归一化在相同设备
+        target_var = Variable(target_normed)
+        
         # compute output
-        output = model(*input_var)
+        output = model(model_input)
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        if args.task == 'regression':
-            mae_error = mae(normalizer.denorm(output.data.cpu()), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            mae_errors.update(mae_error, target.size(0))
-            if test:
-                test_pred = normalizer.denorm(output.data.cpu())
-                test_target = target
-                test_preds += test_pred.view(-1).tolist()
-                test_targets += test_target.view(-1).tolist()
-                test_cif_ids += batch_cif_ids
-        else:
-            accuracy, precision, recall, fscore, auc_score = \
-                class_eval(output.data.cpu(), target)
-            losses.update(loss.data.cpu().item(), target.size(0))
-            accuracies.update(accuracy, target.size(0))
-            precisions.update(precision, target.size(0))
-            recalls.update(recall, target.size(0))
-            fscores.update(fscore, target.size(0))
-            auc_scores.update(auc_score, target.size(0))
-            if test:
-                test_pred = torch.exp(output.data.cpu())
-                test_target = target
-                assert test_pred.shape[1] == 2
-                test_preds += test_pred[:, 1].tolist()
-                test_targets += test_target.view(-1).tolist()
-                test_cif_ids += batch_cif_ids
+
+        mae_error = mae(normalizer.denorm(output.data.cpu()), target)
+        losses.update(loss.data.cpu().item(), target.size(0))
+        mae_errors.update(mae_error, target.size(0))
+        if test:
+            test_pred = normalizer.denorm(output.data.cpu())
+            test_target = target
+            test_preds += test_pred.view(-1).tolist()
+            test_targets += test_target.view(-1).tolist()
+            test_cif_ids += batch_cif_ids
+        
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         if i % args.print_freq == 0:
-            if args.task == 'regression':
                 print('Test: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                       'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
                     i, len(val_loader), batch_time=batch_time, loss=losses,
                     mae_errors=mae_errors))
-            else:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Accu {accu.val:.3f} ({accu.avg:.3f})\t'
-                      'Precision {prec.val:.3f} ({prec.avg:.3f})\t'
-                      'Recall {recall.val:.3f} ({recall.avg:.3f})\t'
-                      'F1 {f1.val:.3f} ({f1.avg:.3f})\t'
-                      'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses,
-                    accu=accuracies, prec=precisions, recall=recalls,
-                    f1=fscores, auc=auc_scores))
 
     if test:
         star_label = '**'
@@ -413,14 +417,11 @@ def validate(val_loader, model, criterion, normalizer, test=False):
                 writer.writerow((cif_id, target, pred))
     else:
         star_label = '*'
-    if args.task == 'regression':
-        print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
+        
+    print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
                                                         mae_errors=mae_errors))
-        return mae_errors.avg
-    else:
-        print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
-                                                 auc=auc_scores))
-        return auc_scores.avg
+    return mae_errors.avg
+
 
 
 class Normalizer(object):

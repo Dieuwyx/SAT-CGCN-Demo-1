@@ -16,11 +16,16 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
+'''修改'''
+import torch_geometric.utils as utils
+from torch_geometric.utils import k_hop_subgraph, to_undirected
+
 # 数据集划分函数
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
-                              num_workers=1, pin_memory=False, **kwargs):
+                              num_workers=1, pin_memory=False,
+                              **kwargs):
     """
     用于将数据集划分为 train、val、test 数据集的实用函数。
     ----------
@@ -129,24 +134,62 @@ def collate_pool(dataset_list):
     batch_atom_fea, batch_nbr_fea, batch_nbr_fea_idx = [], [], []
     crystal_atom_idx, batch_target = [], []
     batch_cif_ids = []
+    batch_sub_nodes = []      # 新增
+    batch_sub_edges = []      # 新增
+    batch_sub_indicator = []  # 新增
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
-            in enumerate(dataset_list):
-        n_i = atom_fea.shape[0]  # 此晶体的原子数
+    edge_offset = 0
+    
+    
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx), 
+            sub_nodes, 
+            sub_edges,
+            sub_indicator,target, cif_id)in enumerate(dataset_list):
+        # === 过滤无效边 ===
+        valid_mask = (nbr_fea_idx != -1)
+        nbr_fea = nbr_fea[valid_mask]
+        nbr_fea_idx = nbr_fea_idx[valid_mask]
+
+        n_i = atom_fea.shape[0]
+        # 1. 收集原子特征
         batch_atom_fea.append(atom_fea)
+        # 2. 收集邻居特征（过滤后的有效特征）
         batch_nbr_fea.append(nbr_fea)
-        batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
-        new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
-        crystal_atom_idx.append(new_idx)
+        # 3. 收集邻居索引
+        batch_nbr_fea_idx.append(nbr_fea_idx + base_idx)
+
+        # === 调整子图边索引 ===
+        # 关键修改：基于节点偏移base_idx调整边索引
+        adjusted_sub_edges = sub_edges + base_idx  # 每个样本的节点从base_idx开始
+        batch_sub_edges.append(adjusted_sub_edges)
+
+        # === 其他逻辑保持不变 ===
+        batch_sub_nodes.append(sub_nodes + base_idx)
+        batch_sub_indicator.append(sub_indicator + base_idx)
+        base_idx += atom_fea.shape[0]  # 更新节点偏移
+
+        crystal_atom_idx.append(torch.LongTensor(np.arange(n_i) + base_idx))
         batch_target.append(target)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
-    return (torch.cat(batch_atom_fea, dim=0),
+
+
+
+        # === 正确拼接边索引 ===
+        # 合并后形状为 [2, total_edges]
+    combined_sub_edges = torch.cat(batch_sub_edges, dim=1) if batch_sub_edges else torch.empty((2, 0))
+
+    return (
+        (   torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
-            crystal_atom_idx),\
-        torch.stack(batch_target, dim=0),\
-        batch_cif_ids
+            torch.cat(batch_sub_nodes),
+            torch.cat(batch_sub_edges, dim=1),
+            torch.cat(batch_sub_indicator)
+        ),   # 新增
+            torch.stack(batch_target, dim=0),
+            batch_cif_ids
+            )
 
 # 高斯距离扩展
 class GaussianDistance(object):
@@ -297,9 +340,14 @@ class CIFData(Dataset):
     cif_id: str or int
     """
     def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
+                 random_seed=123, k_hop=2):
+        
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
+        self.k_hop = k_hop # 新增，用于构建k-hop子图
+        
+        
+        # 三个文件的路径和存在性检查
         assert os.path.exists(root_dir), 'root_dir does not exist!'
         id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
         assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
@@ -310,6 +358,7 @@ class CIFData(Dataset):
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
+        
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
 
@@ -329,26 +378,124 @@ class CIFData(Dataset):
         atom_fea = torch.Tensor(atom_fea)
         all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
         all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+        
+        # === 新增：过滤无效原子索引 ===
+        valid_atoms = [i for i in range(len(crystal)) 
+                  if crystal[i].specie.number in self.ari.atom_types]
+        if not valid_atoms:
+            raise ValueError(f"No valid atoms in {cif_id}")
+        
+        
+        
         nbr_fea_idx, nbr_fea = [], []
-        for nbr in all_nbrs:
-            if len(nbr) < self.max_num_nbr:
-                warnings.warn('{} not find enough neighbors to build graph. '
-                              'If it happens frequently, consider increase '
-                              'radius.'.format(cif_id))
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
+        for i, nbr in enumerate(all_nbrs):
+            # 过滤无效填充值
+            valid_nbrs = [x for x in nbr if x[2] < len(crystal)]  # 确保邻居索引不越界
+            if len(valid_nbrs) < self.max_num_nbr:
+                valid_indices = [x[2] for x in valid_nbrs]
+                valid_distances = [x[1] for x in valid_nbrs]
+                # 使用真实数据填充剩余部分
+                padded_indices = valid_indices + [-1]*(self.max_num_nbr - len(valid_nbrs))
+                padded_distances = valid_distances + [0.]*(self.max_num_nbr - len(valid_nbrs))
             else:
-                nbr_fea_idx.append(list(map(lambda x: x[2],
-                                            nbr[:self.max_num_nbr])))
-                nbr_fea.append(list(map(lambda x: x[1],
-                                        nbr[:self.max_num_nbr])))
-        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+                valid_nbrs = valid_nbrs[:self.max_num_nbr]
+                padded_indices = [x[2] for x in valid_nbrs]
+                padded_distances = [x[1] for x in valid_nbrs]
+            
+            nbr_fea_idx.append(padded_indices)
+            nbr_fea.append(padded_distances)
+        
+        # === 转换时明确维度 ===
+        nbr_fea = np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
-        atom_fea = torch.Tensor(atom_fea)
-        nbr_fea = torch.Tensor(nbr_fea)
+        nbr_fea = torch.Tensor(nbr_fea)  # [num_valid_edges, nbr_fea_len]
+        nbr_fea = nbr_fea.view(-1, self.gdf.filter.size)  # [原子数*最大邻居数, 特征数]
+        
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        
+        # [原子数*最大邻居数, 特征数]
+        # 将 nbr_fea_idx 展平为一维 (总边数)
+        nbr_fea_idx = torch.LongTensor(nbr_fea_idx).view(-1)  # [原子数*最大邻居数]
+        
+        
+        atom_fea = torch.Tensor(atom_fea)
         target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+        
+        # === 新增子图提取 ===
+        edge_index = self._get_undirected_edges(nbr_fea_idx)  # 转换为无向边
+        sub_nodes_list, sub_edge_index_list, sub_indicator_list = [], [], []
+        edge_offset = 0
+
+        # 确保每个样本的 nbr_fea_idx 长度 = 原子数 * max_num_nbr
+        assert len(nbr_fea_idx) == atom_fea.shape[0] * 12, \
+            f"Invalid nbr_fea_idx length: {len(nbr_fea_idx)} vs {atom_fea.shape[0] * 12}"
+        
+        for node_idx in valid_atoms:
+            # 安全获取邻居索引
+            try:
+                nbr_info = all_nbrs[node_idx][:self.max_num_nbr]
+                nbr_indices = [n[2] for n in nbr_info]
+                nbr_distances = [n[1] for n in nbr_info]
+            except IndexError:
+                continue
+            
+            # 生成有效边索引
+            edge_index = self._get_valid_edges(node_idx, nbr_indices, len(crystal))
+            
+            # 安全提取子图
+            if edge_index.size(1) == 0:  # 无邻居的情况
+                sub_nodes = torch.tensor([node_idx],dtype=torch.long)
+                edge_index_sub = torch.empty((2, 0), dtype=torch.long)
+            else:
+                try:
+                    sub_nodes, edge_index_sub, _, _ = k_hop_subgraph(
+                    node_idx=node_idx,
+                    num_hops=self.k_hop,
+                    edge_index=edge_index,
+                    relabel_nodes=True,
+                    num_nodes=len(crystal))
+                    if edge_index_sub.dim() != 2 or edge_index_sub.size(0) != 2:
+                        raise ValueError(f"Invalid edge_index shape: {edge_index_sub.shape}")
+                except Exception as e:
+                    print(f"Error processing {cif_id} node {node_idx}: {str(e)}")
+                    sub_nodes = torch.tensor([node_idx])
+                    edge_index_sub = torch.empty((2, 0), dtype=torch.long)
+            
+            # 处理索引偏移
+            sub_nodes_list.append(sub_nodes + edge_offset)
+            sub_edge_index_list.append(edge_index_sub + edge_offset)
+            sub_indicator_list.append(torch.full((sub_nodes.size(0),), node_idx))
+            edge_offset += len(crystal)  # 按晶体结构偏移索引
+
+            
+        return ((atom_fea, nbr_fea, nbr_fea_idx),             
+            torch.cat(sub_nodes_list) if sub_nodes_list else torch.empty(0),
+            torch.cat(sub_edge_index_list, dim=1) if sub_edge_index_list else torch.empty((2, 0)),
+            torch.cat(sub_indicator_list) if sub_indicator_list else torch.empty(0),
+            target, cif_id
+        )
+        
+    def _get_undirected_edges(self, nbr_fea_idx):
+        """将邻接矩阵转换为无向边索引"""
+        src_nodes = []
+        dst_nodes = []
+        for i in range(nbr_fea_idx.size(0)):
+            valid_nbrs = nbr_fea_idx[i][nbr_fea_idx[i] != 0]
+            src_nodes.extend([i] * len(valid_nbrs))
+            dst_nodes.extend(valid_nbrs.tolist())
+        edge_index = torch.tensor([src_nodes, dst_nodes], dtype=torch.long)
+        return to_undirected(edge_index)  # 转换为无向图
+    
+    
+    def _get_valid_edges(self, node_idx, nbr_indices, num_nodes):
+        """生成有效边索引并过滤越界索引"""
+        valid_nbrs = []
+        for nbr in nbr_indices:
+            if 0 <= nbr < num_nodes:  # 确保邻居索引有效
+                valid_nbrs.append(nbr)
+        
+        # 构建边索引
+        src = [node_idx]*len(valid_nbrs)
+        dst = valid_nbrs
+        edge_index = torch.tensor([src + dst, dst + src], dtype=torch.long)  # 无向图
+        return edge_index.unique(dim=1)  # 去重
