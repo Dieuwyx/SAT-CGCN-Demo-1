@@ -24,6 +24,20 @@ def my_inc(self, key, value, *args, **kwargs):
 class GraphDataset(object):
     def __init__(self, dataset, degree=False, k_hop=2, se="gnn", use_subgraph_edge_attr=False,
                  cache_path=None, return_complete_index=True):
+        '''
+        dataset：图数据集，通常是一个包含图结构数据的列表。
+        degree：是否计算节点的度。
+        k_hop：子图提取的k-hop值，用于提取节点的邻居信息。
+        se (structure extractor)：指定使用的结构提取器类型，默认为gnn，也可以选择khopgnn。
+        use_subgraph_edge_attr：是否在子图中使用边特征。
+        cache_path：用于缓存的路径，避免每次都重新计算。
+        return_complete_index：是否返回完整的索引信息。
+        cif_path 和 atom_init_file：这两个用于加载和初始化原子特征
+
+        Initialize the graph dataset.
+        '''
+
+
         self.dataset = dataset
         self.n_features = dataset[0].x.shape[-1]
         self.degree = degree

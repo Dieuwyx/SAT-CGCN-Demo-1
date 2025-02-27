@@ -1,5 +1,7 @@
-from __future__ import print_function, division
+'''这是CGCNN的data文件'''
 
+from __future__ import print_function, division
+# 用于文件处理的包
 import csv
 import functools
 import json
@@ -14,29 +16,25 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
-
+# 数据集划分函数
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
                               num_workers=1, pin_memory=False, **kwargs):
     """
-    Utility function for dividing a dataset to train, val, test datasets.
-
-    !!! The dataset needs to be shuffled before using the function !!!
-
-    Parameters
+    用于将数据集划分为 train、val、test 数据集的实用函数。
     ----------
     dataset: torch.utils.data.Dataset
       The full dataset to be divided.
-    collate_fn: torch.utils.data.DataLoader
-    batch_size: int
+    collate_fn: torch.utils.data.DataLoader  用于批处理的函数，默认为 default_collate,用于将样本打包成一个批次。
+    batch_size: int  每个批次的大小
     train_ratio: float
     val_ratio: float
     test_ratio: float
     return_test: bool
-      Whether to return the test dataset loader. If False, the last test_size
-      data will be hidden.
-    num_workers: int
+    是否返回测试集的 DataLoader
+    是否返回测试数据集加载器。如果为 False,则最后test_size数据将被隐藏。
+    num_workers: int  数据加载时使用的工作线程数。
     pin_memory: bool
 
     Returns
@@ -94,25 +92,24 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     else:
         return train_loader, val_loader
 
-
+# 批处理函数
 def collate_pool(dataset_list):
     """
-    Collate a list of data and return a batch for predicting crystal
-    properties.
+    整理数据列表并返回用于预测晶体的批处理性能。
 
-    Parameters
+    超参数
     ----------
 
     dataset_list: list of tuples for each data point.
       (atom_fea, nbr_fea, nbr_fea_idx, target)
 
-      atom_fea: torch.Tensor shape (n_i, atom_fea_len)
-      nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)
-      nbr_fea_idx: torch.LongTensor shape (n_i, M)
-      target: torch.Tensor shape (1, )
+      atom_fea: torch.Tensor shape (n_i, atom_fea_len)  原子特征矩阵
+      nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)  邻居特征矩阵，表示每个原子与 M 个邻居的特征。
+      nbr_fea_idx: torch.LongTensor shape (n_i, M)  表示每个原子的邻居索引
+      target: torch.Tensor shape (1, )  目标属性（形状 (1,)），可以是回归任务的数值或者分类任务的标签。
       cif_id: str or int
 
-    Returns
+    返回量
     -------
     N = sum(n_i); N0 = sum(i)
 
@@ -120,10 +117,13 @@ def collate_pool(dataset_list):
       Atom features from atom type
     batch_nbr_fea: torch.Tensor shape (N, M, nbr_fea_len)
       Bond features of each atom's M neighbors
+      每个原子的 M 个邻居的键特征
     batch_nbr_fea_idx: torch.LongTensor shape (N, M)
       Indices of M neighbors of each atom
+      每个原子的 M 个邻居的索引
     crystal_atom_idx: list of torch.LongTensor of length N0
       Mapping from the crystal idx to atom idx
+      从晶体 idx 映射到原子 idx
     target: torch.Tensor shape (N, 1)
       Target value for prediction
     batch_cif_ids: list
@@ -134,7 +134,7 @@ def collate_pool(dataset_list):
     base_idx = 0
     for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
             in enumerate(dataset_list):
-        n_i = atom_fea.shape[0]  # number of atoms for this crystal
+        n_i = atom_fea.shape[0]  # 此晶体的原子数
         batch_atom_fea.append(atom_fea)
         batch_nbr_fea.append(nbr_fea)
         batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
@@ -150,9 +150,11 @@ def collate_pool(dataset_list):
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
-
+# 高斯距离扩展
 class GaussianDistance(object):
     """
+    该类用于计算原子之间距离的高斯扩展。具体功能是根据给定的最小距离 dmin、最大距离 dmax
+    和步长 step,创建一个高斯滤波器，并应用于原子间的距离矩阵。
     Expands the distance by Gaussian basis.
 
     Unit: angstrom
@@ -164,10 +166,13 @@ class GaussianDistance(object):
 
         dmin: float
           Minimum interatomic distance
+          最小原子间距离
         dmax: float
           Maximum interatomic distance
+          最大原子间距离
         step: float
           Step size for the Gaussian filter
+          Gaussian 滤波器的步长
         """
         assert dmin < dmax
         assert dmax - dmin > step
@@ -179,27 +184,31 @@ class GaussianDistance(object):
     def expand(self, distances):
         """
         Apply Gaussian disntance filter to a numpy distance array
-
+        方法接受一个距离矩阵，将其与高斯滤波器进行卷积，得到扩展后的距离。
         Parameters
         ----------
 
         distance: np.array shape n-d array
           A distance matrix of any shape
+          任意形状的距离矩阵
 
         Returns
         -------
         expanded_distance: shape (n+1)-d array
           Expanded distance matrix with the last dimension of length
           len(self.filter)
+          具有 length 的最后一个维度的扩展距离矩阵
+
         """
         return np.exp(-(distances[..., np.newaxis] - self.filter)**2 /
                       self.var**2)
 
-
+# 原子特征初始化器
 class AtomInitializer(object):
     """
     Base class for intializing the vector representation for atoms.
-
+    该类的作用是初始化原子的特征表示。
+    初始化过程是通过一个字典将每种元素的原子特征表示存储在内存中。
     !!! Use one AtomInitializer per dataset !!!
     """
     def __init__(self, atom_types):
@@ -225,12 +234,13 @@ class AtomInitializer(object):
                                 self._embedding.items()}
         return self._decodedict[idx]
 
-
+# 读取JSON
 class AtomCustomJSONInitializer(AtomInitializer):
     """
     Initialize atom feature vectors using a JSON file, which is a python
     dictionary mapping from element number to a list representing the
     feature vector of the element.
+    继承自 AtomInitializer，专门通过一个 JSON 文件加载原子特征，该文件包含了每种元素的特征向量。
 
     Parameters
     ----------
@@ -317,6 +327,9 @@ class CIFData(Dataset):
     def __len__(self):
         return len(self.id_prop_data)
 
+
+    # 加载一个样本时，将从 CIF 文件中读取原子特征，并使用 GaussianDistance 类扩展邻居特征，
+    # 最终返回包含原子特征、邻居特征、邻居索引以及目标值（属性）的一组数据。
     @functools.lru_cache(maxsize=None)  # Cache loaded structures
     def __getitem__(self, idx):
         cif_id, target = self.id_prop_data[idx]
