@@ -41,13 +41,16 @@ class GraphDataset(object):
         self.dataset = dataset
         self.n_features = dataset[0].x.shape[-1]
         self.degree = degree
+
         self.compute_degree()
         self.abs_pe_list = None
         self.return_complete_index = return_complete_index
         self.k_hop = k_hop
         self.se = se
         self.use_subgraph_edge_attr = use_subgraph_edge_attr
+        # 子图的缓存路径
         self.cache_path = cache_path
+        # 子图提取
         if self.se == 'khopgnn':
             Data.__inc__ = my_inc
             self.extract_subgraphs()

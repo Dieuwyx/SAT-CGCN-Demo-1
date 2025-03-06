@@ -204,7 +204,8 @@ def main():
     n_tags = 28
     num_edge_features = 4
 
-    train_dset = GraphDataset(datasets.ZINC(data_path, subset=True,split='train'), degree=True, k_hop=args.k_hop, se=args.se,
+    train_dset = GraphDataset(
+        datasets.ZINC(data_path, subset=True,split='train'), degree=True, k_hop=args.k_hop, se=args.se,
         use_subgraph_edge_attr=args.use_edge_attr)
 
     input_size = n_tags

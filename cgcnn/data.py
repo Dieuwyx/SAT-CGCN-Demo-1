@@ -18,18 +18,17 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # 数据集划分函数
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
-                              batch_size=64, train_ratio=None,
+                              batch_size=64,
+                              train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
                               num_workers=1, pin_memory=False, **kwargs):
     """
     用于将数据集划分为 train、val、test 数据集的实用函数。
     ----------
-    
     输入：
     完整数据集 + 划分参数 
     dataset: torch.utils.data.Dataset.
     collate_fn: torch.utils.data.DataLoader  用于批处理的函数，默认为 default_collate,用于将样本打包成一个批次。
-    
     划分参数：
     batch_size: int  每个批次的大小
     train_ratio: float
@@ -38,7 +37,6 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     return_test: bool  是否返回测试集的 DataLoader；是否返回测试数据集加载器。如果为 False,则最后test_size数据将被隐藏。
     num_workers: int  数据加载时使用的工作线程数。
     pin_memory: bool 是否启用内存锁页（加速GPU传输）
-
     输出：
     返回 train_loader, val_loader, test_loader（当 return_test=True）
     train_loader: torch.utils.data.DataLoader
@@ -52,38 +50,23 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     
     # 数据集的总大小
     total_size = len(dataset)
-    # 如果 train_size 为 None，则使用 train_ratio 划分训练集
-    if kwargs['train_size'] is None:
-        # 如果 train_ratio 为 None，则使用 1 - val_ratio - test_ratio 作为训练数据
-        if train_ratio is None:
-            assert val_ratio + test_ratio < 1
-            train_ratio = 1 - val_ratio - test_ratio
-            print(f'[Warning] train_ratio is None, using 1 - val_ratio - '
+    # 如果 train_ratio 为 None，则使用 1 - val_ratio - test_ratio 作为训练数据
+    if train_ratio is None:
+        assert val_ratio + test_ratio < 1
+        train_ratio = 1 - val_ratio - test_ratio
+        print(f'[Warning] train_ratio is None, using 1 - val_ratio - '
                   f'test_ratio = {train_ratio} as training data.')
-        else:
-            assert train_ratio + val_ratio + test_ratio <= 1
+    else:
+        assert train_ratio + val_ratio + test_ratio <= 1
     
     # 生成数据集的索引
     indices = list(range(total_size))
-    
-    # 
-    if kwargs['train_size']:
-        train_size = kwargs['train_size']
-    else:
-        train_size = int(train_ratio * total_size)
-        
-    # 
-    if kwargs['test_size']:
-        test_size = kwargs['test_size']
-    else:
-        test_size = int(test_ratio * total_size)
-    if kwargs['val_size']:
-        valid_size = kwargs['val_size']
-    else:
-        valid_size = int(val_ratio * total_size)
+    train_size = int(train_ratio * total_size)
+    test_size = int(test_ratio * total_size)
+    valid_size = int(val_ratio * total_size)
+
     train_sampler = SubsetRandomSampler(indices[:train_size])
-    val_sampler = SubsetRandomSampler(
-        indices[-(valid_size + test_size):-test_size])
+    val_sampler = SubsetRandomSampler(indices[-(valid_size + test_size):-test_size])
     if return_test:
         test_sampler = SubsetRandomSampler(indices[-test_size:])
     train_loader = DataLoader(dataset, batch_size=batch_size,
