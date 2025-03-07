@@ -8,47 +8,22 @@ import json
 import os
 import random
 import warnings
+from tqdm import tqdm
 
 import numpy as np
 import torch
 from pymatgen.core.structure import Structure
+from torch_geometric.data import Data
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
-from torch.utils.data.sampler import SubsetRandomSampler
+from torch.utils.data import random_split
 
 # 数据集划分函数
 def get_train_val_test_loader(dataset,
-                              collect_fn = collate_pool,
                               batch_size=64,
                               train_ratio=None,
                               val_ratio=0.1, test_ratio=0.1, return_test=False,
                               num_workers=1, pin_memory=False, **kwargs):
-    """
-    用于将数据集划分为 train、val、test 数据集的实用函数。
-    ----------
-    输入：
-    完整数据集 + 划分参数 
-    dataset: torch.utils.data.Dataset.
-    collate_fn: torch.utils.data.DataLoader  用于批处理的函数，默认为 default_collate,用于将样本打包成一个批次。
-    划分参数：
-    batch_size: int  每个批次的大小
-    train_ratio: float
-    val_ratio: float
-    test_ratio: float
-    return_test: bool  是否返回测试集的 DataLoader；是否返回测试数据集加载器。如果为 False,则最后test_size数据将被隐藏。
-    num_workers: int  数据加载时使用的工作线程数。
-    pin_memory: bool 是否启用内存锁页（加速GPU传输）
-    输出：
-    返回 train_loader, val_loader, test_loader（当 return_test=True）
-    train_loader: torch.utils.data.DataLoader
-      DataLoader that random samples the training data.
-    val_loader: torch.utils.data.DataLoader
-      DataLoader that random samples the validation data.
-    (test_loader): torch.utils.data.DataLoader
-      DataLoader that random samples the test data, returns if 
-        return_test=True.
-    """
-    
     # 数据集的总大小
     total_size = len(dataset)
     # 如果 train_ratio 为 None，则使用 1 - val_ratio - test_ratio 作为训练数据
@@ -65,28 +40,13 @@ def get_train_val_test_loader(dataset,
     train_size = int(train_ratio * total_size)
     test_size = int(test_ratio * total_size)
     valid_size = int(val_ratio * total_size)
+    # 使用 random_split 划分数据集
+    train_dset, val_dset, test_dset = random_split(dataset, [train_size, valid_size, test_size])
 
-    train_sampler = SubsetRandomSampler(indices[:train_size])
-    val_sampler = SubsetRandomSampler(indices[-(valid_size + test_size):-test_size])
     if return_test:
-        test_sampler = SubsetRandomSampler(indices[-test_size:])
-    train_loader = DataLoader(dataset, batch_size=batch_size,
-                              sampler=train_sampler,
-                              num_workers=num_workers,
-                              collate_fn=collate_fn, pin_memory=pin_memory)
-    val_loader = DataLoader(dataset, batch_size=batch_size,
-                            sampler=val_sampler,
-                            num_workers=num_workers,
-                            collate_fn=collate_fn, pin_memory=pin_memory)
-    if return_test:
-        test_loader = DataLoader(dataset, batch_size=batch_size,
-                                 sampler=test_sampler,
-                                 num_workers=num_workers,
-                                 collate_fn=collate_fn, pin_memory=pin_memory)
-    if return_test:
-        return train_loader, val_loader, test_loader
+        return train_dset, val_dset, test_dset
     else:
-        return train_loader, val_loader
+        return train_dset, val_dset
 
 # 将多个样本打包成一个批次，处理变长原子序列。
 
@@ -336,3 +296,30 @@ class CIFData(Dataset):
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         target = torch.Tensor([float(target)])
         return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+
+def crystal_graph_list(g):
+    structures = []  # (atom_fea, nbr_fea, nbr_fea_idx)
+    target = []
+    cif_id = []
+    g_list = []
+    data_len = len(g)
+
+    for i in tqdm(range(0, data_len)):
+        # 修改为long()格式
+        structures.append(g[i][0])
+        target.append(g[i][1])
+        cif_id.append(g[i][2])
+        g_list.append(Data(x = structures[i][0],
+                             edge_attr = structures[i][2],
+                             edge_index = structures[i][1],
+                             y = target[i]))
+        # print(g_list[i])
+        g_list[i].edge_index = g_list[i].edge_index.long()
+        # 降维成二维
+        edge_index = g_list[i].edge_index
+        edge_index = edge_index.view(-1, edge_index.size(-1))
+        g_list[i].edge_index = edge_index
+
+    print("Crystal to graph completed！")
+
+    return g_list

@@ -79,7 +79,7 @@ else:
 # 主函数
 def main():
     # 加载数据集，输出：元组 ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
-    dataset = CIFData(data_options)
+    dataset = CIFData(data_path=data_options)
     # 将数据列表整理成用于预测晶体的批处理性能，打包(atom_fea, nbr_fea, nbr_fea_idx, target)
     collate_fn = collate_pool
     # 数据集划分函数
