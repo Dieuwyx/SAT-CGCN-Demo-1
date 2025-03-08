@@ -45,14 +45,14 @@ from CSAT.model import CrystalGraphConvNet
 warnings.filterwarnings("ignore")
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
-# python main_demo_0.py ./dataset
+# python main_demo_0.py ./crystal_dataset
 
 # 参数解析
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 
 # 数据集路径
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
-                    help='dataset options, started with the path to root dir, '
+                    help='crystal_dataset options, started with the path to root dir, '
                          'then other options')
 # 是否禁用CUDA
 parser.add_argument('--disable-cuda', action='store_true',

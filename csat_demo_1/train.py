@@ -22,7 +22,7 @@ config = {
 
 # 数据准备
 dataset = CrystalDataset(
-    root='./dataset',
+    root='./crystal_dataset',
     radius=5.0,
     k_hop=config['k_hop']
 )

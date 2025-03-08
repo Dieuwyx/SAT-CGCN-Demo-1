@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # 从cgcnn中加载晶体数据
-si_data_path = './dataset'
+si_data_path = 'crystal_dataset'
 si_data = CIFData(si_data_path)
 data_len = len(si_data)
 print("有多少张图数据",data_len)

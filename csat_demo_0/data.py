@@ -32,7 +32,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     
     输入：
     完整数据集 + 划分参数 
-    dataset: torch.utils.data.Dataset.
+    crystal_dataset: torch.utils.data.Dataset.
     collate_fn: torch.utils.data.DataLoader  用于批处理的函数，默认为 default_collate,用于将样本打包成一个批次。
     
     划分参数：
@@ -250,7 +250,7 @@ class AtomInitializer(object):
     Base class for intializing the vector representation for atoms.
     该类的作用是初始化原子的特征表示。
     初始化过程是通过一个字典将每种元素的原子特征表示存储在内存中。
-    !!! Use one AtomInitializer per dataset !!!
+    !!! Use one AtomInitializer per crystal_dataset !!!
     """
     def __init__(self, atom_types):
         self.atom_types = set(atom_types)
@@ -316,7 +316,7 @@ class CIFData(Dataset):
     ----------
 
     root_dir: str
-        The path to the root directory of the dataset
+        The path to the root directory of the crystal_dataset
     max_num_nbr: int
         The maximum number of neighbors while constructing the crystal graph
     radius: float
@@ -326,7 +326,7 @@ class CIFData(Dataset):
     step: float
         The step size for constructing GaussianDistance
     random_seed: int
-        Random seed for shuffling the dataset
+        Random seed for shuffling the crystal_dataset
 
     
     输出：元组 ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)

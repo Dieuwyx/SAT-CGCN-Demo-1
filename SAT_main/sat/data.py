@@ -6,7 +6,7 @@ import torch_geometric.utils as utils
 from torch_geometric.data import Data
 import numpy as np
 import os
-from torch_geometric.data import  Batch
+
 
 def my_inc(self, key, value, *args, **kwargs):
     if key == 'subgraph_edge_index':
@@ -24,33 +24,16 @@ def my_inc(self, key, value, *args, **kwargs):
 class GraphDataset(object):
     def __init__(self, dataset, degree=False, k_hop=2, se="gnn", use_subgraph_edge_attr=False,
                  cache_path=None, return_complete_index=True):
-        '''
-        dataset：图数据集，通常是一个包含图结构数据的列表。
-        degree：是否计算节点的度。
-        k_hop：子图提取的k-hop值，用于提取节点的邻居信息。
-        se (structure extractor)：指定使用的结构提取器类型，默认为gnn，也可以选择khopgnn。
-        use_subgraph_edge_attr：是否在子图中使用边特征。
-        cache_path：用于缓存的路径，避免每次都重新计算。
-        return_complete_index：是否返回完整的索引信息。
-        cif_path 和 atom_init_file：这两个用于加载和初始化原子特征
-
-        Initialize the graph dataset.
-        '''
-
-
         self.dataset = dataset
         self.n_features = dataset[0].x.shape[-1]
         self.degree = degree
-
         self.compute_degree()
         self.abs_pe_list = None
         self.return_complete_index = return_complete_index
         self.k_hop = k_hop
         self.se = se
         self.use_subgraph_edge_attr = use_subgraph_edge_attr
-        # 子图的缓存路径
         self.cache_path = cache_path
-        # 子图提取
         if self.se == 'khopgnn':
             Data.__inc__ = my_inc
             self.extract_subgraphs()
@@ -175,47 +158,3 @@ class GraphDataset(object):
             data.subgraph_indicator = None
 
         return data
-
-
-def custom_collate_fn(data_list):
-    """
-    自定义 collate_fn，用于处理维度不一致的图数据。
-    """
-    batch = Batch()
-
-    # 处理节点特征 (x)
-    batch.x = torch.cat([data.x for data in data_list], dim=0)
-
-    # 处理边索引 (edge_index)
-    edge_index_list = []
-    num_nodes = 0
-    for data in data_list:
-        edge_index_list.append(data.edge_index.long() + num_nodes)  # 偏移边索引
-        num_nodes += data.x.size(0)  # 累加节点数
-    batch.edge_index = torch.cat(edge_index_list, dim=1)
-
-    # 处理边特征 (edge_attr)
-    batch.edge_attr = torch.cat([data.edge_attr for data in data_list], dim=0)
-
-    # 处理目标标签 (y)
-    batch.y = torch.cat([data.y for data in data_list], dim=0)
-
-    # 处理完全图的边索引 (complete_edge_index)
-    complete_edge_index_list = []
-    num_nodes = 0
-    for data in data_list:
-        complete_edge_index_list.append(data.complete_edge_index.long() + num_nodes)  # 偏移边索引
-        num_nodes += data.x.size(0)  # 累加节点数
-    batch.complete_edge_index = torch.cat(complete_edge_index_list, dim=1)
-
-
-    # 处理节点的度 (degree)
-    batch.degree = torch.cat([data.degree for data in data_list], dim=0)
-
-    # 添加 batch 索引
-    batch.batch = torch.cat([
-        torch.full((data.x.size(0),), i, type=torch.long) for i, data in enumerate(data_list)
-    ], dim=0)
-
-    return batch
-
