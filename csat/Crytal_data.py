@@ -17,13 +17,13 @@ from torch_geometric.data import Data
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data import random_split
+from scipy.sparse import coo_matrix
 
 # 数据集划分函数
 def get_train_val_test_loader(dataset,
-                              batch_size=64,
-                              train_ratio=None,
-                              val_ratio=0.1, test_ratio=0.1, return_test=False,
-                              num_workers=1, pin_memory=False, **kwargs):
+                              batch_size=128,
+                              train_ratio=0.8,
+                              val_ratio=0.1, test_ratio=0.1, return_test=False, **kwargs):
     # 数据集的总大小
     total_size = len(dataset)
     # 如果 train_ratio 为 None，则使用 1 - val_ratio - test_ratio 作为训练数据
@@ -36,13 +36,12 @@ def get_train_val_test_loader(dataset,
         assert train_ratio + val_ratio + test_ratio <= 1
     
     # 生成数据集的索引
-    indices = list(range(total_size))
+    # indices = list(range(total_size))
     train_size = int(train_ratio * total_size)
     test_size = int(test_ratio * total_size)
     valid_size = int(val_ratio * total_size)
     # 使用 random_split 划分数据集
     train_dset, val_dset, test_dset = random_split(dataset, [train_size, valid_size, test_size])
-
     if return_test:
         return train_dset, val_dset, test_dset
     else:
@@ -88,7 +87,8 @@ def collate_pool(dataset_list):
     return (torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
-            crystal_atom_idx),\
+            crystal_atom_idx
+            ),\
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
@@ -298,28 +298,39 @@ class CIFData(Dataset):
         return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
 
 def crystal_graph_list(g):
-    structures = []  # (atom_fea, nbr_fea, nbr_fea_idx)
-    target = []
-    cif_id = []
+    device = torch.device('cuda')
     g_list = []
     data_len = len(g)
+    print('正在转化的数据集大小为：',data_len)
 
     for i in tqdm(range(0, data_len)):
-        # 修改为long()格式
-        structures.append(g[i][0])
-        target.append(g[i][1])
-        cif_id.append(g[i][2])
-        g_list.append(Data(x = structures[i][0],
-                             edge_attr = structures[i][2],
-                             edge_index = structures[i][1],
-                             y = target[i]))
-        # print(g_list[i])
-        g_list[i].edge_index = g_list[i].edge_index.long()
-        # 降维成二维
-        edge_index = g_list[i].edge_index
-        edge_index = edge_index.view(-1, edge_index.size(-1))
-        g_list[i].edge_index = edge_index
+        structures, target, cif_ids = g[i]
+        g_graph = Data(x = structures[0],
+                             edge_attr = structures[1],
+                             edge_index = structures[2],
+                             y = target)
+        g_list.append(g_graph)
+        g_list[i].x = g_list[i].x.long()
+        g_list[i].y = g_list[i].y.long()
 
-    print("Crystal to graph completed！")
+        # 对三维的边特征进行降维
+        edge_attr = g_list[i].edge_attr
+        edge_attr = edge_attr.view(-1, edge_attr.size(-1))
+        g_list[i].edge_attr = edge_attr.long()
+        # print('edge_attr的维度，请判断是否为2维',edge_attr.shape)
+
+        # 将edge_index重塑为 (num_edges, 2)
+        edge_index = g_list[i].edge_index
+        num_edges = edge_index.size(0) * edge_index.size(1) // 2
+        edge_index = edge_index.view(-1, 2)  # 重塑为 (num_edges, 2)
+        # 转置为 (2, num_edges)
+        edge_index = edge_index.t()
+        # 打印调整后的edge_index
+        # print('edge_index为，请判断是否为(2, num_edges)',edge_index.shape)  # 应该是 (2, num_edges)
+        g_list[i].edge_index = edge_index.long()
+
+    print("转化已完成，请检查一下！")
+    print(g_list[0])
+    print('edge_idex的维度是',g_list[0].edge_index.shape)
 
     return g_list

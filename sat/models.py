@@ -71,6 +71,7 @@ class GraphTransformer(nn.Module):
         self.se = se
         encoder_layer = TransformerEncoderLayer(
             d_model, num_heads, dim_feedforward, dropout, batch_norm=batch_norm,
+
             gnn_type=gnn_type, se=se, **kwargs)
         self.encoder = GraphTransformerEncoder(encoder_layer, num_layers)
         self.global_pool = global_pool

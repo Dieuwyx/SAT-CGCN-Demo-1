@@ -6,7 +6,7 @@ import torch_geometric.utils as utils
 from torch_geometric.data import Data
 import numpy as np
 import os
-
+from torch_geometric.data import  Batch
 
 def my_inc(self, key, value, *args, **kwargs):
     if key == 'subgraph_edge_index':
@@ -175,3 +175,47 @@ class GraphDataset(object):
             data.subgraph_indicator = None
 
         return data
+
+
+def custom_collate_fn(data_list):
+    """
+    自定义 collate_fn，用于处理维度不一致的图数据。
+    """
+    batch = Batch()
+
+    # 处理节点特征 (x)
+    batch.x = torch.cat([data.x for data in data_list], dim=0)
+
+    # 处理边索引 (edge_index)
+    edge_index_list = []
+    num_nodes = 0
+    for data in data_list:
+        edge_index_list.append(data.edge_index.long() + num_nodes)  # 偏移边索引
+        num_nodes += data.x.size(0)  # 累加节点数
+    batch.edge_index = torch.cat(edge_index_list, dim=1)
+
+    # 处理边特征 (edge_attr)
+    batch.edge_attr = torch.cat([data.edge_attr for data in data_list], dim=0)
+
+    # 处理目标标签 (y)
+    batch.y = torch.cat([data.y for data in data_list], dim=0)
+
+    # 处理完全图的边索引 (complete_edge_index)
+    complete_edge_index_list = []
+    num_nodes = 0
+    for data in data_list:
+        complete_edge_index_list.append(data.complete_edge_index.long() + num_nodes)  # 偏移边索引
+        num_nodes += data.x.size(0)  # 累加节点数
+    batch.complete_edge_index = torch.cat(complete_edge_index_list, dim=1)
+
+
+    # 处理节点的度 (degree)
+    batch.degree = torch.cat([data.degree for data in data_list], dim=0)
+
+    # 添加 batch 索引
+    batch.batch = torch.cat([
+        torch.full((data.x.size(0),), i, type=torch.long) for i, data in enumerate(data_list)
+    ], dim=0)
+
+    return batch
+

@@ -28,7 +28,7 @@ class Attention(gnn.MessagePassing):
     """
 
     def __init__(self, embed_dim, num_heads=8, dropout=0., bias=False,
-        symmetric=False, gnn_type="gcn", se="gnn", k_hop=2, **kwargs):
+        symmetric=False, gnn_type="gcn", se="gnn", k_hop=2, batch_first=True, **kwargs):
 
         super().__init__(node_dim=0, aggr='add')
         self.embed_dim = embed_dim
@@ -38,7 +38,7 @@ class Attention(gnn.MessagePassing):
 
         self.num_heads = num_heads
         self.scale = head_dim ** -0.5
-
+        self.batch_first = batch_first
         self.se = se
 
         self.gnn_type = gnn_type
@@ -122,12 +122,14 @@ class Attention(gnn.MessagePassing):
         if self.symmetric:
             qk = self.to_qk(x_struct)
             qk = (qk, qk)
+            print('qk is',qk)
         else:
             qk = self.to_qk(x_struct).chunk(2, dim=-1)
-        
+
+
         # Compute complete self-attention
         attn = None
-
+        #####################################################################################################
         if complete_edge_index is not None:
             out = self.propagate(complete_edge_index, v=v, qk=qk, edge_attr=None, size=None,
                                  return_attn=return_attn)
@@ -139,7 +141,9 @@ class Attention(gnn.MessagePassing):
                     attn,
                 ).to_dense().transpose(0, 1)
 
+            # print("out shape before rearrange:", out.shape())  # 检查 out 的形状
             out = rearrange(out, 'n h d -> n (h d)')
+            # out = rearrange(out, 'b n h d -> b n (h d)')  # 调整 rearrange 的输入维度
         else:
             out, attn = self.self_attn(qk, v, ptr, return_attn=return_attn)
         return self.out_proj(out), attn
@@ -147,9 +151,18 @@ class Attention(gnn.MessagePassing):
     def message(self, v_j, qk_j, qk_i, edge_attr, index, ptr, size_i, return_attn):
         """Self-attention operation compute the dot-product attention """
 
-        qk_i = rearrange(qk_i, 'n (h d) -> n h d', h=self.num_heads)
-        qk_j = rearrange(qk_j, 'n (h d) -> n h d', h=self.num_heads)
-        v_j = rearrange(v_j, 'n (h d) -> n h d', h=self.num_heads)
+        batch_size, num_nodes, num_features = qk_i.shape
+        # 1. 合并批次和节点维度
+        qk_i_reshaped = qk_i.view(batch_size * num_nodes, num_features)  # 形状变为 [batch_size * num_nodes, num_features]
+        qk_i = rearrange(qk_i_reshaped, 'n (h d) -> n h d', h=self.num_heads)
+
+        batch_size_j, num_nodes_j, num_features_j = qk_j.shape
+        qk_j_reshaped = qk_j.view(batch_size_j * num_nodes_j, num_features_j)  # 形状变为 [batch_size * num_nodes, num_features]
+        qk_j = rearrange(qk_j_reshaped, 'n (h d) -> n h d', h=self.num_heads)
+
+        batch_size_v, num_nodes_v, num_features_v = v_j.shape
+        v_j_reshaped = v_j.view(batch_size_v * num_nodes_v,num_features_v)  # 形状变为 [batch_size * num_nodes, num_features]
+        v_j = rearrange(v_j_reshaped, 'n (h d) -> n h d', h=self.num_heads)
         attn = (qk_i * qk_j).sum(-1) * self.scale
         if edge_attr is not None:
             attn = attn + edge_attr
@@ -201,7 +214,7 @@ class StructureExtractor(nn.Module):
     """
 
     def __init__(self, embed_dim, gnn_type="gcn", num_layers=3,
-                 batch_norm=True, concat=True, khopgnn=False, **kwargs):
+                 batch_norm=False, concat=True, khopgnn=False, **kwargs):
         super().__init__()
         self.num_layers = num_layers
         self.khopgnn = khopgnn
@@ -215,9 +228,11 @@ class StructureExtractor(nn.Module):
         self.relu = nn.ReLU()
         self.batch_norm = batch_norm
         inner_dim = (num_layers + 1) * embed_dim if concat else embed_dim
+        print(inner_dim)
 
         if batch_norm:
             self.bn = nn.BatchNorm1d(inner_dim)
+
 
         self.out_proj = nn.Linear(inner_dim, embed_dim)
 
@@ -249,6 +264,7 @@ class StructureExtractor(nn.Module):
             return x
 
         if self.num_layers > 0 and self.batch_norm:
+            print("x shape before BatchNorm1d:", x.shape)  # 检查 x 的形状
             x = self.bn(x)
 
         x = self.out_proj(x)
@@ -287,6 +303,7 @@ class KHopStructureExtractor(nn.Module):
 
         if batch_norm:
             self.bn = nn.BatchNorm1d(2 * embed_dim)
+            print('batchnormal is ',embed_dim*2)
 
         self.out_proj = nn.Linear(2 * embed_dim, embed_dim)
 
@@ -303,7 +320,16 @@ class KHopStructureExtractor(nn.Module):
         )
         x_struct = torch.cat([x, x_struct], dim=-1)
         if self.batch_norm:
-            x_struct = self.bn(x_struct)
+            print("x_struct shape before BatchNorm1d:", x_struct.shape)
+            batch_size = x_struct.size(0)  # 获取批次大小
+            num_nodes = x_struct.size(1)  # 获取节点数量
+            num_features = x_struct.size(2)  # 获取特征维度
+
+            x_struct = x_struct.view(-1, x_struct.size(-1))  # 调整为 [8 * 92, 128]
+            print("x_struct shape after reshape:", x_struct.shape)  # [736, 128]
+            x_struct = self.bn(x_struct)  # 应用 BatchNorm1d
+            x_struct = x_struct.view(batch_size, num_nodes, num_features)  # 动态调整形状
+
         x_struct = self.out_proj(x_struct)
 
         return x_struct
