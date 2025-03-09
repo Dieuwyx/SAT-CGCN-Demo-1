@@ -12,36 +12,31 @@ import torch.nn.functional as F
 from torch_geometric.data import DataLoader
 from torch_geometric import datasets
 import torch_geometric.utils as utils
-from torch.utils.data import  Subset
 
-from csat.models import GraphTransformer
-from csat.data import GraphDataset
-from csat.utils import count_parameters
-from csat.position_encoding import POSENCODINGS
-from csat.gnn_layers import GNN_TYPES
+
+
+from sat.models import GraphTransformer
+from sat.data import GraphDataset
+from sat.utils import count_parameters
+from sat.position_encoding import POSENCODINGS
+from sat.gnn_layers import GNN_TYPES
 from timeit import default_timer as timer
-
-from csat.crytal_data import CIFData, crystal_graph_list, get_train_val_test_loader
-import warnings
-warnings.filterwarnings("ignore")
-
-
 
 # 超参数
 def load_args():
     parser = argparse.ArgumentParser(
-        description='Structure-Aware Transformer on Crystal',
+        description='Structure-Aware Transformer on ZINC',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--seed', type=int, default=0,
                         help='random seed')
-    parser.add_argument('--crystal_dataset', type=str, default="Crystal",
+    parser.add_argument('--crystal_dataset', type=str, default="ZINC",
                         help='name of crystal_dataset')
     parser.add_argument('--num-heads', type=int, default=8, help="number of heads")
     parser.add_argument('--num-layers', type=int, default=6, help="number of layers")
     parser.add_argument('--dim-hidden', type=int, default=64, help="hidden dimension of Transformer")
     parser.add_argument('--dropout', type=float, default=0.2, help="dropout")
 
-    parser.add_argument('--epochs', type=int, default=500,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='number of epochs')
 
     parser.add_argument('--lr', type=float, default=0.001,
@@ -52,7 +47,7 @@ def load_args():
     parser.add_argument('--abs-pe', type=str, default=None, choices=POSENCODINGS.keys(),
                         help='which absolute PE to use?')
     parser.add_argument('--abs-pe-dim', type=int, default=20, help='dimension for absolute PE')
-    parser.add_argument('--outdir', type=str, default='./csat_out',
+    parser.add_argument('--outdir', type=str, default='',
                         help='output path')
     parser.add_argument('--warmup', type=int, default=5000, help="number of iterations for warmup")
     parser.add_argument('--layer-norm', action='store_true', help='use layer norm instead of batch norm')
@@ -62,16 +57,16 @@ def load_args():
                         choices=GNN_TYPES,
                         help="GNN structure extractor type")
 
-    parser.add_argument('--k-hop', type=int, default=2,
-                        help="Number of hops to use when extracting subgraphs around each node")
+
+    parser.add_argument('--k-hop', type=int, default=2, 
+        help="Number of hops to use when extracting subgraphs around each node")
     parser.add_argument('--global-pool', type=str, default='mean', choices=['mean', 'cls', 'add'],
                         help='global pooling method')
     parser.add_argument('--se', type=str, default="khopgnn",
-                        help='Extractor type: khopgnn, or gnn')
+            help='Extractor type: khopgnn, or gnn')
 
     args = parser.parse_args()
     args.use_cuda = torch.cuda.is_available()
-    # args.use_cuda = False
     args.batch_norm = not args.layer_norm
 
     args.save_logs = False
@@ -83,13 +78,13 @@ def load_args():
                 os.makedirs(outdir)
             except Exception:
                 pass
-        outdir = outdir
+        outdir = outdir + '/{}'.format(args.dataset)
         if not os.path.exists(outdir):
             try:
                 os.makedirs(outdir)
             except Exception:
                 pass
-        outdir = outdir
+        outdir = outdir + '/seed{}'.format(args.seed)
         if not os.path.exists(outdir):
             try:
                 os.makedirs(outdir)
@@ -137,7 +132,7 @@ def train_epoch(model, loader, criterion, optimizer, lr_scheduler, epoch, use_cu
 
     tic = timer()
     for i, data in enumerate(loader):
-        # print(data)
+        #print(data)
         size = len(data.y)
         if args.warmup is not None:
             iteration = epoch * len(loader) + i
@@ -158,14 +153,14 @@ def train_epoch(model, loader, criterion, optimizer, lr_scheduler, epoch, use_cu
         loss = criterion(output, data.y)
         loss.backward()
         optimizer.step()
-
+        
         running_loss += loss.item() * size
 
     toc = timer()
     n_sample = len(loader.dataset)
     epoch_loss = running_loss / n_sample
     print('Train loss: {:.4f} time: {:.2f}s'.format(
-        epoch_loss, toc - tic))
+          epoch_loss, toc - tic))
     return epoch_loss
 
 
@@ -196,7 +191,7 @@ def eval_epoch(model, loader, criterion, use_cuda=False, split='Val'):
     epoch_mae = mae_loss / n_sample
     epoch_mse = mse_loss / n_sample
     print('{} loss: {:.4f} MSE loss: {:.4f} MAE loss: {:.4f} time: {:.2f}s'.format(
-        split, epoch_loss, epoch_mse, epoch_mae, toc - tic))
+          split, epoch_loss, epoch_mse, epoch_mae, toc - tic))
     return epoch_mae, epoch_mse
 
 
@@ -206,47 +201,36 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     print(args)
-    data_path = './crystal_dataset'
+    data_path = '../zinc_datasets/ZINC'
     # number of node attributes for ZINC crystal_dataset
     n_tags = 28
-    input_size = n_tags
     num_edge_features = 4
-    print('batch size',args.batch_size)
 
-    dataset = CIFData(data_path)
+    indices = range(0, 10)  # 1~10
+    train_zinc = datasets.ZINC(data_path, subset=True, split='train')
+    val_zinc = datasets.ZINC(data_path, subset=True, split='val')
+    test_zinc = datasets.ZINC(data_path, subset=True, split='test')
 
-    indices = range(0, 1000)  # 100，1000都没有问题，5000就出错
-    dataset = torch.utils.data.Subset(dataset, indices)
+    train_zinc = torch.utils.data.Subset(train_zinc, indices)
+    val_zinc = torch.utils.data.Subset(val_zinc, indices)
+    test_zinc = torch.utils.data.Subset(test_zinc, indices)
 
-    dataset = crystal_graph_list(dataset)
-
-
-    train_dset, val_dset, test_dset = get_train_val_test_loader(
-        dataset=dataset,
-        batch_size=args.batch_size,
-        train_ratio=0.8,
-        val_ratio=0.1,
-        test_ratio=0.1,
-        return_test=True)
-
-    #
-
-
-
-    print('第1张图的数据类型为：', train_dset[0])
-    train_dset = GraphDataset(train_dset, degree=True, k_hop=args.k_hop, se=args.se,
-                              use_subgraph_edge_attr=args.use_edge_attr)
-    print('含有子图第1张', train_dset[0])
-
+    print('zinc数据集第1张图的数据类型为：', datasets.ZINC(data_path, subset=True,split='train')[0])
+    train_dset = GraphDataset(train_zinc, degree=True, k_hop=args.k_hop, se=args.se,
+        use_subgraph_edge_attr=args.use_edge_attr)
+    print('含有子图的zinc第1张', train_dset[0])
+    input_size = n_tags
+    print(args.batch_size)
     train_loader = DataLoader(train_dset, batch_size=args.batch_size,
-                              shuffle=True)
+            shuffle=True)
     for batch in train_loader:
         print('loader之后：', batch)
         break
 
-    val_dset = GraphDataset(val_dset, degree=True, k_hop=args.k_hop, se=args.se,
-                            use_subgraph_edge_attr=args.use_edge_attr)
 
+    val_dset = GraphDataset(val_zinc, degree=True, k_hop=args.k_hop, se=args.se,
+        use_subgraph_edge_attr=args.use_edge_attr)
+    
     val_loader = DataLoader(val_dset, batch_size=args.batch_size, shuffle=False)
 
     abs_pe_encoder = None
@@ -261,10 +245,10 @@ def main():
         utils.degree(data.edge_index[1], num_nodes=data.num_nodes) for
         data in train_dset])
 
-    model = GraphTransformer(in_size=92,# 查atom_fea_len
+    model = GraphTransformer(in_size=input_size,
                              num_class=1,
                              d_model=args.dim_hidden,
-                             dim_feedforward=2 * args.dim_hidden,
+                             dim_feedforward=2*args.dim_hidden,
                              dropout=args.dropout,
                              num_heads=args.num_heads,
                              num_layers=args.num_layers,
@@ -273,12 +257,12 @@ def main():
                              abs_pe_dim=args.abs_pe_dim,
                              gnn_type=args.gnn_type,
                              use_edge_attr=args.use_edge_attr,
-                             num_edge_features=41,# 这个的大小也影响不大
+                             num_edge_features=4,
                              edge_dim=args.edge_dim,
                              k_hop=args.k_hop,
                              se=args.se,
                              deg=deg,
-                             global_pool=args.global_pool)
+                             global_pool=args.global_pool) 
 
     if args.use_cuda:
         model.cuda()
@@ -295,7 +279,6 @@ def main():
     else:
         lr_steps = (args.lr - 1e-6) / args.warmup
         decay_factor = args.lr * args.warmup ** .5
-
         def lr_scheduler(s):
             if s < args.warmup:
                 lr = 1e-6 + s * lr_steps
@@ -303,12 +286,12 @@ def main():
                 lr = decay_factor * s ** -.5
             return lr
 
-    test_dset = GraphDataset(test_dset, degree=True, k_hop=args.k_hop, se=args.se,
-                             use_subgraph_edge_attr=args.use_edge_attr)
+    test_dset = GraphDataset(test_zinc, degree=True, k_hop=args.k_hop, se=args.se,
+        use_subgraph_edge_attr=args.use_edge_attr)
 
     test_loader = DataLoader(test_dset, batch_size=args.batch_size, shuffle=False)
-
-    # FIXME
+    
+    #FIXME
     if abs_pe_encoder is not None:
         abs_pe_encoder.apply_to(test_dset)
 
@@ -321,8 +304,8 @@ def main():
     for epoch in range(args.epochs):
         print("Epoch {}/{}, LR {:.6f}".format(epoch + 1, args.epochs, optimizer.param_groups[0]['lr']))
         train_loss = train_epoch(model, train_loader, criterion, optimizer, lr_scheduler, epoch, args.use_cuda)
-        val_loss, _ = eval_epoch(model, val_loader, criterion, args.use_cuda, split='Val')
-        test_loss, _ = eval_epoch(model, test_loader, criterion, args.use_cuda, split='Test')
+        val_loss,_ = eval_epoch(model, val_loader, criterion, args.use_cuda, split='Val')
+        test_loss,_ = eval_epoch(model, test_loader, criterion, args.use_cuda, split='Test')
 
         if args.warmup is None:
             lr_scheduler.step(val_loss)
@@ -361,7 +344,7 @@ def main():
                        header=['value'], index_label='name')
         torch.save(
             {'args': args,
-             'state_dict': best_weights},
+            'state_dict': best_weights},
             args.outdir + '/model.pth')
 
 

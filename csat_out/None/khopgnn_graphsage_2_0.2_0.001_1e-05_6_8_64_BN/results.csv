@@ -1,0 +1,6 @@
+name,value
+test_mae,1.0399153232574463
+test_mse,1.0814238786697388
+val_mae,3.105692148208618
+best_epoch,498.0
+total_time,92.7805436
