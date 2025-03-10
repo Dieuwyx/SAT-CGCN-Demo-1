@@ -122,6 +122,7 @@ class GraphDataset(object):
 
         if self.n_features == 1:
             data.x = data.x.squeeze(-1)
+            #[16,28]------>[16]------->[16,1]
 
         if not isinstance(data.y, list):
             data.y = data.y.view(data.y.shape[0], -1)

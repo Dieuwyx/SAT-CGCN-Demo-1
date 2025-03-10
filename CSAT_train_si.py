@@ -41,7 +41,7 @@ def load_args():
     parser.add_argument('--dim-hidden', type=int, default=64, help="hidden dimension of Transformer")
     parser.add_argument('--dropout', type=float, default=0.2, help="dropout")
 
-    parser.add_argument('--epochs', type=int, default=500,
+    parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs')
 
     parser.add_argument('--lr', type=float, default=0.001,
@@ -206,19 +206,20 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     print(args)
-    data_path = './crystal_dataset'
+    data_path = './sample-regression'
     # number of node attributes for ZINC crystal_dataset
-    n_tags = 28
-    input_size = n_tags
-    num_edge_features = 4
+    # n_tags = 28
+    # input_size = n_tags
+    # num_edge_features = 4
     print('batch size',args.batch_size)
 
     dataset = CIFData(data_path)
 
-    indices = range(0, 1000)  # 100，1000都没有问题，5000就出错
+    indices = range(0, 10)  # 100，1000都没有问题，5000就出错
     dataset = torch.utils.data.Subset(dataset, indices)
 
     dataset = crystal_graph_list(dataset)
+    print('num of total graphs:', len(dataset))
 
 
     train_dset, val_dset, test_dset = get_train_val_test_loader(
@@ -273,7 +274,7 @@ def main():
                              abs_pe_dim=args.abs_pe_dim,
                              gnn_type=args.gnn_type,
                              use_edge_attr=args.use_edge_attr,
-                             num_edge_features=41,# 这个的大小也影响不大
+                             num_edge_features=41,# 边的特征数量
                              edge_dim=args.edge_dim,
                              k_hop=args.k_hop,
                              se=args.se,

@@ -325,6 +325,24 @@ def crystal_graph_list(g):
             # nbr_fea: torch.Tensor shape (n_i, M, nbr_fea_len)   nbr_fea_len: int Number of bond features.
             # nbr_fea_idx: torch.LongTensor shape (n_i, M)        M: Max number of neighbors
         # target: torch.Tensor shape (1, )
+
+        '''Graph Data
+        x (节点特征)：
+        形状：[num_nodes, num_node_features]
+        描述：每个节点的特征矩阵。num_nodes 是图中节点的数量，num_node_features 是每个节点的特征维度。
+        例如，在分子图中，x 可能表示原子的类型、电荷等特征。
+        edge_index (边的连接关系)：
+        
+        形状：[2, num_edges]
+        
+        edge_attr (边特征)：
+        形状：[num_edges, num_edge_features]
+        描述：每条边的特征矩阵。num_edges 是图中边的数量，num_edge_features 是每条边的特征维度。
+        
+        y (目标值)：
+        形状：[num_targets]
+        '''
+
         x = structures[0]
         nbr_fea = structures[1]
         nbr_fea_idx = structures[2]
@@ -334,10 +352,10 @@ def crystal_graph_list(g):
         M = nbr_fea.shape[1]
         nbr_fea_len = nbr_fea.shape[2]
 
-        # 1. 检查 nbr_fea_idx 中的值是否合法
-        if torch.any(nbr_fea_idx >= n_i) or torch.any(nbr_fea_idx < 0):
-            raise ValueError("nbr_fea_idx contains invalid node indices. "
-                             "Node indices must be in the range [0, n_i - 1].")
+        # 检查 nbr_fea_idx 中的值是否合法
+        #if torch.any(nbr_fea_idx >= n_i) or torch.any(nbr_fea_idx < 0):
+        #    raise ValueError("nbr_fea_idx contains invalid node indices. "
+        #                     "Node indices must be in the range [0, n_i - 1].")
 
         # 1.构建edge_index和edge_attr
         # nbr_fea_idx 是 (n_i, M)，表示每个节点的 M 个邻居
@@ -356,7 +374,19 @@ def crystal_graph_list(g):
         edge_attr = nbr_fea.view(-1, nbr_fea_len)
         edge_attr = torch.cat([edge_attr, edge_attr], dim=0)  # 复制反向边特征 (2*n_i*M, nbr_fea_len)
 
-        #  检查并去除自环边
+        # 检查并去除重复边
+        # 将 edge_index 和 edge_attr 拼接在一起
+        #combined = torch.cat([edge_index.T, edge_attr], dim=1)  # [num_edges, 2 + nbr_fea_len]
+        # 使用 torch.unique 去重
+        #unique_combined, indices = torch.unique(combined, dim=0, return_inverse=True)
+        # 检查是否有重复边
+        #if unique_combined.shape[0] < combined.shape[0]:
+        #    print("Warning: edge_index contains duplicate edges (including edge_attr).")
+        # 提取去重后的 edge_index 和 edge_attr
+        #edge_index = unique_combined[:, :2].T  # [2, num_unique_edges]
+        #edge_attr = unique_combined[:, 2:]  # [num_unique_edges, nbr_fea_len]
+
+        # 检查并去除自环边
         self_loops = edge_index[0] == edge_index[1]
         if torch.any(self_loops):
             print("Warning: edge_index contains self-loops.")
@@ -368,9 +398,16 @@ def crystal_graph_list(g):
 
         # 2.x降维
         # 降到指定维度
+
+
         target_dim = 1  # 目标维度
         linear_layer = nn.Linear(atom_fea_len, target_dim)
         x = linear_layer(x) # 降维
+
+        # edge_attr是否需要经理降维？
+        # edge_attr = linear_layer(edge_attr)  # 降维
+
+
 
         # 将float转化成long
         x = torch.tensor(x, dtype=torch.long)

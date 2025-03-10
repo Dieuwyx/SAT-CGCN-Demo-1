@@ -245,7 +245,7 @@ def main():
         utils.degree(data.edge_index[1], num_nodes=data.num_nodes) for
         data in train_dset])
 
-    model = GraphTransformer(in_size=input_size,
+    model = GraphTransformer(in_size=28,
                              num_class=1,
                              d_model=args.dim_hidden,
                              dim_feedforward=2*args.dim_hidden,
